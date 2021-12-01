@@ -1,0 +1,24 @@
+Package: rumr
+Title: Regression Uncertainty Modeler with R
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = c("David", "Senhora"),
+           family = "Navega",
+           role = c("aut", "cre", "cph"),
+           email = "dsnavega@gmail.com",
+           comment = c(ORCID = "0000-0003-4495-3762"))
+Description: This package allows to construct predictive intervals for regression
+        models by recasting uncertainty estimation itself as a regression problem.
+        Currently implementing truncated gaussian, conformal prediction and local
+        uncertainty estimation models.
+License: GPL-3 + file LICENSE
+Encoding: UTF-8
+Language: en
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1
+Imports: 
+    ggplot2,
+    truncnorm,
+    e1071,
+    stats
