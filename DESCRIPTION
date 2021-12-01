@@ -12,6 +12,7 @@ Description: This package allows to construct predictive intervals for regressio
         Currently implementing truncated gaussian, conformal prediction and local
         uncertainty estimation models.
 License: GPL-3 + file LICENSE
+License: GPL-3
 Encoding: UTF-8
 Language: en
 LazyData: true
