@@ -11,7 +11,6 @@ Description: This package allows to construct predictive intervals for regressio
         models by recasting uncertainty estimation itself as a regression problem.
         Currently implementing truncated gaussian, conformal prediction and local
         uncertainty estimation models.
-License: GPL-3 + file LICENSE
 License: GPL-3
 Encoding: UTF-8
 Language: en

@@ -1,6 +1,6 @@
 # This file is part of rumr
 #
-# Copyright (C) 2021, David Senhora Navega
+# Copyright (C) 2022, David Senhora Navega
 #
 # rumr is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -44,6 +44,7 @@
 #' @param signed a logical. Defines if conformal prediction should be signed
 #' (assymetrical) or unsigned (symmetrical) prediction intervals around the
 #' predicted value. See Details.
+#' @param exponent a numeric. Non-linear variance estimation
 #'
 #' @details
 #' TODO
@@ -53,7 +54,7 @@
 #'
 rumr <- function(
   known, predicted, type,
-  alpha = 0.05, interval = NULL, delta = 0.25, signed = F
+  alpha = 0.05, interval = NULL, delta = 0.25, signed = F, exponent = 1
 ) {
 
   type <- match.arg(type, c("gaussian", "conformal", "local", "variance"), F)
@@ -61,19 +62,19 @@ rumr <- function(
   model <- switch(type,
 
     gaussian = {
-      infer_gaussian(known, predicted, interval, delta)
+      infer_gaussian(known, predicted, interval, delta, exponent)
     },
 
     conformal = {
-      infer_conformal(known, predicted, interval, delta, signed)
+      infer_conformal(known, predicted, interval, delta, signed, exponent)
     },
 
     variance = {
-      infer_variance(known, predicted, interval, delta)
+      infer_variance(known, predicted, interval, delta, exponent)
     },
 
     local = {
-      infer_local(known, predicted, interval, delta, alpha)
+      infer_local(known, predicted, interval, delta, alpha, exponent)
     }
 
   )

@@ -11,7 +11,8 @@ rumr(
   alpha = 0.05,
   interval = NULL,
   delta = 0.25,
-  signed = F
+  signed = F,
+  exponent = 1
 )
 }
 \arguments{
@@ -36,6 +37,8 @@ values. Must be between 0 and 1. Default is 0.25. See Details.}
 \item{signed}{a logical. Defines if conformal prediction should be signed
 (assymetrical) or unsigned (symmetrical) prediction intervals around the
 predicted value. See Details.}
+
+\item{exponent}{a numeric. Non-linear variance estimation}
 }
 \value{
 a rumr class object.

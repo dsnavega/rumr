@@ -1,6 +1,6 @@
 # This file is part of rumr
 #
-# Copyright (C) 2021, David Senhora Navega
+# Copyright (C) 2022, David Senhora Navega
 #
 # rumr is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -128,7 +128,7 @@ truncate_gaussian <- Vectorize(
 #' @author David Senhora Navega
 #' @noRd
 #'
-infer_variance <- function(known, predicted, interval, delta) {
+infer_variance <- function(known, predicted, interval, delta, exponent) {
 
   if (isFALSE(is.vector(known)))
     stop("\n(-) known must be a vector.")
@@ -161,7 +161,7 @@ infer_variance <- function(known, predicted, interval, delta) {
 
   predicted <- clamp_value(x = predicted, interval = interval)
 
-  A <- cbind(intercept = 1, predicted)
+  A <- cbind(intercept = 1, predicted ^ exponent)
   b <- cbind(variance = abs(known - predicted))
 
   # Compute coefficients (Beta, B)
@@ -175,6 +175,7 @@ infer_variance <- function(known, predicted, interval, delta) {
 
   object <- list(
     coefficients = B,
+    exponent = exponent,
     interval = interval,
     loocv = pmax(x = 1.2533 * as.vector(fitted), 0)
   )
@@ -202,8 +203,8 @@ predict_variance <- function(object, predicted) {
     stop("\n(-) NA values not allowed.")
 
   predicted <- clamp_value(predicted, object$interval)
-  estimate <- as.vector(1.2533 * cbind(1, predicted) %*% object$coefficients)
-  estimate <- pmax(estimate, 0.0)
+  estimate <- cbind(1, predicted ^ object$exponent) %*% object$coefficients
+  estimate <- pmax(as.vector(1.2533 * estimate), 0.0)
 
   return(estimate)
 
@@ -214,7 +215,7 @@ predict_variance <- function(object, predicted) {
 #' @author David Senhora Navega
 #' @noRd
 #'
-infer_conformal <- function(known, predicted, interval, delta, signed) {
+infer_conformal <- function(known, predicted, interval, delta, signed, exponent) {
 
   if (isFALSE(is.vector(known)))
     stop("\n(-) known must be a vector.")
@@ -255,7 +256,9 @@ infer_conformal <- function(known, predicted, interval, delta, signed) {
 
   # Infer Variance
   variance_model <- infer_variance(
-    known = known, predicted = predicted, interval = interval, delta = delta
+    known = known, predicted = predicted,
+    interval = interval, delta = delta,
+    exponent = exponent
   )
 
   variance <- predict_variance(variance_model)
@@ -356,8 +359,9 @@ predict_conformal <- function(object, predicted, alpha = 0.1) {
 #' David Senhora Navega
 #' @noRd
 #' @importFrom e1071 cmeans
+#' @import ykmeans
 #'
-infer_local <- function(known, predicted, interval, delta, alpha) {
+infer_local <- function(known, predicted, interval, delta, alpha, exponent) {
 
   if (isFALSE(is.vector(known)))
     stop("\n(-) known must be a vector.")
@@ -399,29 +403,43 @@ infer_local <- function(known, predicted, interval, delta, alpha) {
   residual <- known - predicted
 
   # Assess number of clusters from known values
-  ncluster <- ceiling(log2(length(unique(known))))
-  kcluster <- cut(x = known, breaks = ncluster, labels = F)
-  known_centers <- sapply(split(known, kcluster), median)
+  ncluster <- ceiling(log2(length(unique(known)) + 1)) + 1
+  clst_df <- data.frame(
+    predicted = predicted, variance = 1.2533 * abs(residual), known = known
+  )
+  clst_object <- ykmeans::ykmeans(
+    x = clst_df,
+    variable.names = c("predicted", "variance"),
+    target.name = "known", k.list = ncluster, n = 100
+  )
 
-  # Fuzzy clustering of predicted values based on known clusters (centers)
-  fcluster <- e1071::cmeans(x = predicted, centers = known_centers)
+  kcenters <- sapply(
+    X = split(clst_df, clst_object$cluster),
+    FUN = function(x) apply(x, 2, mean)
+  )
+
+  kcenters <- t(kcenters)
+
+  # Fuzzy clustering of predicted values based on kclusters (centers)
+  fcluster <- e1071::cmeans(x = clst_df, centers = kcenters)
 
   U <- fcluster$membership
-
-  # seq_alpha <- rev(seq(0.01, 0.5, 0.01))
-  # local_model <- lapply(seq_alpha, function(alpha) {
 
   # Local Uncertainty Estimation Model
   Q <- t(sapply(seq_len(ncluster), function(ith) {
     confidence <- c(alpha / 2, 1 - (alpha / 2))
-    weighted_quantile(x = residual, probs = confidence, weights = U[, ith])
+    weighted_quantile(
+      x = sign(residual) * (1.2533 * abs(residual)),
+      probs = confidence,
+      weights = U[, ith]
+    )
   }))
 
   UQ <- U %*% Q
   colnames(UQ) <- c("lower", "upper")
 
   # Compute coefficients (Beta, B)
-  A <- cbind(intercept = 1, predicted)
+  A <- cbind(intercept = 1, predicted ^ exponent)
   B <- solve(t(A) %*% A, t(A) %*% UQ)
 
   # Hat Matrix (Diagonal)
@@ -434,12 +452,10 @@ infer_local <- function(known, predicted, interval, delta, alpha) {
 
   local_model <- list(
     coefficients = B,
+    exponent = exponent,
     predicted = estimate,
     alpha = alpha
   )
-
-  # })
-  # names(local_model) <- as.character(1 - seq_alpha)
 
   object <- list(
     model = local_model,
@@ -473,8 +489,10 @@ predict_local <- function(object, predicted, alpha) {
     if (isTRUE(any(is.na(predicted))))
       stop("\n(-) NA values not allowed.")
 
-    local_model <- object$model
-    fitted <- cbind(intercept = 1, predicted) %*% local_model$coefficients
+    predicted <- clamp_value(x = predicted, interval = object$interval)
+    local <- object$model
+    fitted <-
+      cbind(intercept = 1, predicted ^ local$exponent) %*% local$coefficients
     predicted <- cbind(estimate = predicted, predicted + fitted)
     predicted <- clamp_value(x = predicted, interval = object$interval)
 
@@ -490,7 +508,7 @@ predict_local <- function(object, predicted, alpha) {
 #' @noRd
 #' @import truncnorm
 #'
-infer_gaussian <- function(known, predicted, interval, delta) {
+infer_gaussian <- function(known, predicted, interval, delta, exponent) {
 
   if (isFALSE(is.vector(known)))
     stop("\n(-) known must be a vector.")
@@ -525,7 +543,9 @@ infer_gaussian <- function(known, predicted, interval, delta) {
 
   # Infer Variance
   variance_model <- infer_variance(
-    known = known, predicted = predicted, interval = interval, delta = delta
+    known = known, predicted = predicted,
+    interval = interval, delta = delta,
+    exponent = exponent
   )
 
   object <- list(
@@ -569,7 +589,10 @@ predict_gaussian <- function(object, predicted, alpha = 0.1) {
 
   alpha <- round(x = alpha, digits = 2)
 
-  fitted <- t(truncate_gaussian(predicted, variance, object$interval, alpha))
+  fitted <- t(
+    truncate_gaussian(predicted, variance, object$interval, alpha)
+  )
+
   return(fitted)
 
 }
@@ -577,35 +600,45 @@ predict_gaussian <- function(object, predicted, alpha = 0.1) {
 #' @author David Senhora Navega
 #' @noRd
 #' @import ggplot2
+#' @importFrom stats supsmu
 #'
 plot_gaussian <- function(
-  object, predicted, alpha = 0.1, normalize = T, digits = 3, label = NULL
+    object, predicted, alpha = 0.1, normalize = T, digits = 3, label = NULL
 ) {
 
+  predicted <- clamp_value(predicted, object$interval)
   fitted <- predict_gaussian(object, predicted, alpha = alpha)
   variance <- predict_variance(object$model, predicted)
 
   # Prediction Domain
   x <- seq(
-    from = object$interval[1], to = object$interval[2], length.out = 512
+    from = object$interval[1], to = object$interval[2], length.out = 2048
   )
 
-  x <- sort(c(fitted, x))
+  x <- sort(c(fitted, x), decreasing = FALSE)
+  x <- round(x, digits = digits)
 
   # Gaussian Density
   y <- truncnorm::dtruncnorm(
     x = x, a = object$interval[1], b = object$interval[2],
-    mean = predicted, sd = variance
+    mean = fitted[1], sd = variance
   )
+  y <- round(y, digits = digits)
 
-  x <- round(x, digits = digits)
-  y <- y
-
+  # Super smooth data using Friedman's supsmu for prettier plot
   if (normalize) {
-    df <- data.frame(x = c(min(x),x,max(x)), y = c(0, y / max(y), 0))
+    df <- data.frame(x = c(min(x), x, max(x)), y = c(0, y / max(y), 0))
+    supsmu_df <- stats::supsmu(df$x, df$y)
+    df <- data.frame(x = supsmu_df$x, y = supsmu_df$y)
+    df <- data.frame(
+      x = c(min(df$x), df$x, max(df$x)), y = c(0, df$y / max(df$y), 0)
+    )
     y_label <- "Density (Normalized)"
   } else {
-    df <- data.frame(x = c(min(x),x,max(x)), y = c(0, y, 0))
+    df <- data.frame(x = c(min(x), x, max(x)), y = c(0, y, 0))
+    supsmu_df <- stats::supsmu(df$x, df$y)
+    df <- data.frame(x = supsmu_df$x, y = supsmu_df$y)
+    df <- data.frame(x = c(min(df$x), df$x, max(df$x)), y = c(0, df$y, 0))
     y_label <- "Density"
   }
 
@@ -635,7 +668,7 @@ plot_gaussian <- function(
     ) +
     ggplot2::ylab(label = y_label) +
     ggplot2::ggtitle(
-      label = "Predictive Distribution (Truncated Gaussian Uncertainty Model)",
+      label = "Predictive Distribution (Truncated Gaussian)",
       subtitle = paste0(
         "Predicted: ",x_values[1]," [", x_values[2]," - ",x_values[3],"]\n",
         "Variance: ", round(variance, digits = digits),"\n",
