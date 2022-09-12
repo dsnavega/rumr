@@ -359,7 +359,7 @@ predict_conformal <- function(object, predicted, alpha = 0.1) {
 #' David Senhora Navega
 #' @noRd
 #' @importFrom e1071 cmeans
-#' @import ykmeans
+#' @importFrom stats kmeans
 #'
 infer_local <- function(known, predicted, interval, delta, alpha, exponent) {
 
@@ -404,35 +404,19 @@ infer_local <- function(known, predicted, interval, delta, alpha, exponent) {
 
   # Assess number of clusters from known values
   ncluster <- ceiling(log2(length(unique(known)) + 1)) + 1
-  clst_df <- data.frame(
-    predicted = predicted, variance = 1.2533 * abs(residual), known = known
-  )
-  clst_object <- ykmeans::ykmeans(
-    x = clst_df,
-    variable.names = c("predicted", "variance"),
-    target.name = "known", k.list = ncluster, n = 100
-  )
 
-  kcenters <- sapply(
-    X = split(clst_df, clst_object$cluster),
-    FUN = function(x) apply(x, 2, mean)
+  # Fuzzy clustering
+  clst_df <- data.frame(known, predicted, error = 1.2533 * abs(residual))
+  fcluster <- e1071::cmeans(
+    x = scale(clst_df), centers = ncluster, iter.max = 100,
   )
-
-  kcenters <- t(kcenters)
-
-  # Fuzzy clustering of predicted values based on kclusters (centers)
-  fcluster <- e1071::cmeans(x = clst_df, centers = kcenters)
 
   U <- fcluster$membership
 
   # Local Uncertainty Estimation Model
   Q <- t(sapply(seq_len(ncluster), function(ith) {
     confidence <- c(alpha / 2, 1 - (alpha / 2))
-    weighted_quantile(
-      x = sign(residual) * (1.2533 * abs(residual)),
-      probs = confidence,
-      weights = U[, ith]
-    )
+    weighted_quantile(x = residual, probs = confidence, weights = U[, ith])
   }))
 
   UQ <- U %*% Q
@@ -446,8 +430,8 @@ infer_local <- function(known, predicted, interval, delta, alpha, exponent) {
   H <- diag(A %*% solve(t(A) %*% A) %*% t(A))
 
   # LOOCV
-  fitted <- ((A %*% B) - (UQ * H)) / (1.0 - H)
-  estimate <- cbind(estimate = predicted, predicted + fitted)
+  endpoints <- ((A %*% B) - (UQ * H)) / (1.0 - H)
+  estimate <- cbind(estimate = predicted, predicted + endpoints)
   estimate <- clamp_value(estimate, interval = interval)
 
   local_model <- list(
@@ -491,9 +475,8 @@ predict_local <- function(object, predicted, alpha) {
 
     predicted <- clamp_value(x = predicted, interval = object$interval)
     local <- object$model
-    fitted <-
-      cbind(intercept = 1, predicted ^ local$exponent) %*% local$coefficients
-    predicted <- cbind(estimate = predicted, predicted + fitted)
+    endpoints <- cbind(intercept = 1, predicted ^ local[[2]]) %*% local[[1]]
+    predicted <- cbind(estimate = predicted, predicted + endpoints)
     predicted <- clamp_value(x = predicted, interval = object$interval)
 
   }
